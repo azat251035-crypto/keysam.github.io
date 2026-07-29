@@ -312,7 +312,9 @@
     background: var(--surface); border:1px solid var(--line); border-radius: 24px;
     max-width: 480px; width:100%; padding: 32px 28px; position:relative;
     max-height: 88vh; overflow-y:auto;
+    scrollbar-width: none; -ms-overflow-style: none;
   }
+  .pm-modal::-webkit-scrollbar{ display:none; width:0; height:0; }
   .pm-close{
     position:absolute; top:14px; right:14px; background:none; border:none; color: var(--muted);
     font-size: 24px; line-height:1; cursor:pointer; padding: 8px;
@@ -326,6 +328,7 @@
   .pm-3d-canvas-wrap{
     width: 300px; height: 340px; display:flex; align-items:center; justify-content:center;
     touch-action:none; cursor:grab; user-select:none; border-radius: 20px; overflow:hidden;
+    background: #FFFFFF;
   }
   .pm-3d-canvas-wrap.dragging{ cursor:grabbing; }
   .pm-3d-canvas-wrap canvas{ display:block; }
@@ -383,10 +386,10 @@
   .pm-current-label strong{ color: var(--ink); }
   .pm-models{ display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
   .pm-model-chip{
-    padding: 8px 16px; border-radius: 999px; border:1px solid var(--line); background: var(--bg-soft);
+    padding: 8px 16px; border-radius: 999px; border:1px solid var(--teal); background: var(--teal); color:#FFFFFF;
     font-size: 12.5px; font-weight:600; cursor:pointer; transition: all .2s; font-family:'JetBrains Mono', monospace;
   }
-  .pm-model-chip.active, .pm-model-chip:hover{ background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .pm-model-chip.active, .pm-model-chip:hover{ background: #FFFFFF; color: var(--teal); border-color: var(--teal); }
 
   .pm-modal{ box-shadow: 0 28px 80px rgba(0,0,0,0.45); }
   .pm-phone-stage{ min-height: 300px; align-items:center; }
@@ -9411,6 +9414,8 @@ f 317 285 315
     const stage = document.getElementById('parade-stage');
 
     const phoneColors = ['#0E7C74', '#FF5A44', '#F5F3EF', '#D8B24A', '#8B6BD1', '#0E7C74'];
+    // matches the marquee order: iPhone 15, iPhone 14, Galaxy S24, Galaxy A54, Redmi Note 13, iPhone 13
+    const phoneBrands = ['apple', 'samsung', 'xiaomi', 'huawei', 'google', 'tesla'];
     const layout = [
       { leftPct: 6,  scale: 0.62, rot: -8  },
       { leftPct: 20, scale: 0.8,  rot: 6   },
@@ -9425,8 +9430,47 @@ f 317 285 315
     const HIT_SPEED = 3;  // impact speed (px/normalized-frame) required to count as a "hit"
     const REVIVE_MS = 7000; // a shattered phone automatically reactivates after this long
 
+    // small brand marks shown on each phone's screen, matching the marquee list below
+    function brandMark(brand){
+      if (brand === 'samsung'){
+        return `<g transform="translate(35 62)">
+          <rect x="-15" y="-6.5" width="30" height="13" rx="6.5" fill="#1428A0"/>
+          <text x="0.3" y="3.6" text-anchor="middle" font-family="Arial, sans-serif" font-size="6.4" font-weight="800" letter-spacing="0.3" fill="#FFFFFF" transform="skewX(-8)">SAMSUNG</text>
+        </g>`;
+      }
+      if (brand === 'xiaomi'){
+        return `<g transform="translate(35 62)">
+          <rect x="-11" y="-11" width="22" height="22" rx="5.5" fill="#FF6900"/>
+          <text x="0" y="4" text-anchor="middle" font-family="Arial, sans-serif" font-size="10.5" font-weight="800" fill="#FFFFFF">MI</text>
+        </g>`;
+      }
+      if (brand === 'huawei'){
+        return `<g transform="translate(35 62)">
+          <circle cx="0" cy="0" r="11.5" fill="#C7000B"/>
+          <text x="0" y="4" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="800" fill="#FFFFFF">H</text>
+        </g>`;
+      }
+      if (brand === 'google'){
+        return `<g transform="translate(35 62)">
+          <rect x="-11" y="-11" width="22" height="22" rx="7" fill="#3C7DFF"/>
+          <text x="0" y="4" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="800" fill="#FFFFFF">G</text>
+        </g>`;
+      }
+      if (brand === 'tesla'){
+        return `<g transform="translate(35 62)">
+          <circle cx="0" cy="0" r="11.5" fill="#CC0000"/>
+          <text x="0" y="4" text-anchor="middle" font-family="Arial, sans-serif" font-size="10.5" font-weight="800" fill="#FFFFFF">T</text>
+        </g>`;
+      }
+      // Apple mark
+      return `<g transform="translate(35 62) scale(0.72)" fill="#F5F5F7" fill-opacity="0.92">
+        <path d="M0-18c-7 0-12 7-12 16 0 12 7 22 14 22 4 0 6-3 10-3 4 0 6 3 10 3 8 0 14-11 14-22 0-9-5-16-12-16-4 0-8 3-12 3s-8-3-12-3z"/>
+        <ellipse cx="5" cy="-19" rx="6" ry="3" transform="rotate(-35 5 -19)"/>
+      </g>`;
+    }
+
     // draws the phone; hits>0 adds crack lines, hits>=MAX_HITS shows a shattered screen
-    function phoneSVG(color, hits){
+    function phoneSVG(color, hits, brand){
       hits = Math.min(hits || 0, MAX_HITS);
       let cracks = '';
       for (let i = 0; i < hits; i++){
@@ -9447,23 +9491,28 @@ f 317 285 315
       const shatterOverlay = shattered
         ? `<rect x="9" y="10" width="52" height="110" rx="9" fill="#000" opacity="0.4"/><circle cx="35" cy="63" r="3" fill="#000" opacity="0.5"/>`
         : '';
+      const brandLogo = shattered ? '' : brandMark(brand);
       return `<svg width="100%" height="100%" viewBox="0 0 ${PHONE_BASE_W} ${PHONE_BASE_H}" fill="none" xmlns="http://www.w3.org/2000/svg">
         <rect x="3" y="3" width="64" height="134" rx="16" fill="${bodyFill}" />
         <rect x="9" y="10" width="52" height="110" rx="9" fill="#111113" />
         <rect x="13" y="16" width="44" height="98" rx="6" fill="${screenFill}" />
         <circle cx="35" cy="14" r="1.6" fill="#3a3a3d" />
         <rect x="44" y="7" width="15" height="15" rx="4" fill="#0A0A0B" opacity="0.9" />
+        ${brandLogo}
         ${cracks}
         ${shatterOverlay}
       </svg>`;
     }
 
-    const WALL_RESTITUTION = 0.5;
-    const COLLISION_RESTITUTION = 0.55;
-    const LINEAR_DAMPING = 0.985;   // per normalized (60fps) frame
-    const ANGULAR_DAMPING = 0.94;
+    const WALL_RESTITUTION = 0.38;
+    const COLLISION_RESTITUTION = 0.4;
+    const LINEAR_DAMPING = 0.965;   // per normalized (60fps) frame
+    const ANGULAR_DAMPING = 0.9;
     const MAX_SPEED = 55;          // px per normalized frame, clamps runaway impulses
-    const SUBSTEPS = 2;            // extra resolution passes per frame for stable stacking
+    const MAX_ANG_SPEED = 9;       // deg per normalized frame, keeps spin from looking jittery
+    const SUBSTEPS = 4;            // extra resolution passes per frame for stable, smooth stacking
+    const CORRECTION_PERCENT = 0.6; // fraction of overlap corrected per pass — softer than a full snap
+    const CORRECTION_SLOP = 0.4;    // small allowed overlap before any correction kicks in, avoids micro-jitter
 
     const phones = layout.map((cfg, i) => {
       const wrap = document.createElement('div');
@@ -9477,14 +9526,15 @@ f 317 285 315
       phone.style.height = '100%';
       phone.style.transformOrigin = 'center center';
       const color = phoneColors[i % phoneColors.length];
-      phone.innerHTML = phoneSVG(color, 0);
+      const brand = phoneBrands[i % phoneBrands.length];
+      phone.innerHTML = phoneSVG(color, 0, brand);
       wrap.appendChild(phone);
       stage.appendChild(wrap);
-      const radius = w / 2;
+      const halfW = w / 2, halfH = h / 2;
       return {
-        wrap, phoneEl: phone, cfg, color,
-        radius,
-        mass: radius * radius, // area-proportional mass: bigger phones push harder, resist more
+        wrap, phoneEl: phone, cfg, color, brand,
+        halfW, halfH,
+        mass: w * h, // area-proportional mass: bigger phones push harder, resist more
         x: 0, y: 0, vx: 0, vy: 0,
         angle: 0, angVel: 0,
         dragging: false, dragOffX: 0, dragOffY: 0,
@@ -9495,7 +9545,7 @@ f 317 285 315
     });
 
     function updateVisual(p){
-      p.phoneEl.innerHTML = phoneSVG(p.color, p.hits);
+      p.phoneEl.innerHTML = phoneSVG(p.color, p.hits, p.brand);
     }
 
     let breakable = true; // toggled by the button below
@@ -9531,16 +9581,65 @@ f 317 285 315
       });
     }
 
+    // total rotation of a phone, in radians (base layout tilt + accumulated spin)
+    function totalAngleRad(p){
+      return (p.cfg.rot + p.angle) * Math.PI / 180;
+    }
+
+    // axis-aligned bounding half-extents of a phone's rotated rectangle —
+    // used for wall clamping and initial placement, since the rect keeps spinning
+    function aabbHalfExtents(p){
+      const rad = totalAngleRad(p);
+      const c = Math.abs(Math.cos(rad)), s = Math.abs(Math.sin(rad));
+      return { hx: p.halfW * c + p.halfH * s, hy: p.halfW * s + p.halfH * c };
+    }
+
     function layoutPositions(){
       const rect = stage.getBoundingClientRect();
       phones.forEach(p => {
-        p.x = rect.width * (p.cfg.leftPct / 100) + p.radius;
-        p.y = rect.height - p.radius - 18;
+        const { hx, hy } = aabbHalfExtents(p);
+        p.x = rect.width * (p.cfg.leftPct / 100) + hx;
+        p.y = rect.height - hy - 18;
         p.vx = 0; p.vy = 0; p.angVel = 0;
       });
     }
     layoutPositions();
     window.addEventListener('resize', layoutPositions);
+
+    // sends every phone flying toward a different, shuffled spot on the stage —
+    // triggered by a quick tap/hit rather than a drag
+    function scatterPhones(){
+      const rect = stage.getBoundingClientRect();
+      const cols = 3, rows = 2; // 6 target zones for 6 phones, so each lands somewhere distinct
+      const cells = [];
+      for (let r = 0; r < rows; r++){
+        for (let c = 0; c < cols; c++){
+          cells.push({ cx: (c + 0.5) / cols, cy: (r + 0.5) / rows });
+        }
+      }
+      // Fisher-Yates shuffle so the phone-to-zone assignment changes every hit
+      for (let i = cells.length - 1; i > 0; i--){
+        const j = Math.floor(Math.random() * (i + 1));
+        [cells[i], cells[j]] = [cells[j], cells[i]];
+      }
+
+      const active = phones.filter(p => !p.dragging && !p.broken);
+      active.forEach((p, i) => {
+        const cell = cells[i % cells.length];
+        const jitterX = (Math.random() - 0.5) * 0.12;
+        const jitterY = (Math.random() - 0.5) * 0.12;
+        const targetX = rect.width * Math.min(0.94, Math.max(0.06, cell.cx + jitterX));
+        const targetY = rect.height * Math.min(0.9, Math.max(0.1, cell.cy + jitterY));
+        let dx = targetX - p.x, dy = targetY - p.y;
+        let dist = Math.hypot(dx, dy);
+        if (dist < 1){ dx = Math.random() - 0.5; dy = -1; dist = Math.hypot(dx, dy) || 1; }
+        const nx = dx / dist, ny = dy / dist;
+        const speed = MAX_SPEED * (0.55 + Math.random() * 0.45);
+        p.vx = nx * speed;
+        p.vy = ny * speed;
+        p.angVel = (Math.random() - 0.5) * 8;
+      });
+    }
 
     phones.forEach(p => {
       p.wrap.addEventListener('pointerdown', (e) => {
@@ -9551,14 +9650,21 @@ f 317 285 315
         p.dragOffX = (e.clientX - rect.left) - p.x;
         p.dragOffY = (e.clientY - rect.top) - p.y;
         p.vx = 0; p.vy = 0;
+        p.pointerDownX = e.clientX;
+        p.pointerDownY = e.clientY;
+        p.pointerDownTime = performance.now();
       });
       p.wrap.addEventListener('pointermove', (e) => {
         if (!p.dragging) return;
         const rect = stage.getBoundingClientRect();
         const nx = (e.clientX - rect.left) - p.dragOffX;
         const ny = (e.clientY - rect.top) - p.dragOffY;
-        p.vx = nx - p.x;
-        p.vy = ny - p.y;
+        // blend the new frame delta into the tracked velocity instead of
+        // replacing it outright — smooths out the release throw so a jittery
+        // sequence of pointermove events doesn't produce a jerky flick
+        const rawVx = nx - p.x, rawVy = ny - p.y;
+        p.vx = p.vx * 0.5 + rawVx * 0.5;
+        p.vy = p.vy * 0.5 + rawVy * 0.5;
         p.x = nx; p.y = ny;
       });
       const stopDrag = (e) => {
@@ -9566,28 +9672,71 @@ f 317 285 315
         p.dragging = false;
         p.wrap.classList.remove('dragging');
         try { p.wrap.releasePointerCapture(e.pointerId); } catch(_){}
+        // a quick tap (little movement, released fast) counts as a "hit" —
+        // scatter every phone rather than just nudging the one tapped
+        const moveDist = Math.hypot(e.clientX - p.pointerDownX, e.clientY - p.pointerDownY);
+        const elapsed = performance.now() - p.pointerDownTime;
+        if (moveDist < 6 && elapsed < 400){
+          scatterPhones();
+        }
       };
       p.wrap.addEventListener('pointerup', stopDrag);
       p.wrap.addEventListener('pointercancel', stopDrag);
     });
 
+    // local face-normal axes of a rotated rectangle (u = along width, v = along height)
+    function obbAxes(rad){
+      const c = Math.cos(rad), s = Math.sin(rad);
+      return { ux: c, uy: s, vx: -s, vy: c };
+    }
+
+    // rotated-rectangle vs rotated-rectangle collision via the Separating Axis
+    // Theorem. Unlike a circle-circle test, this is exact for rectangles —
+    // it correctly catches two phones touching corner-to-corner, not just
+    // when their centers are close enough.
     function resolveCollision(a, b){
+      const axA = obbAxes(totalAngleRad(a));
+      const axB = obbAxes(totalAngleRad(b));
       const dx = b.x - a.x, dy = b.y - a.y;
-      let dist = Math.hypot(dx, dy);
-      const minDist = a.radius + b.radius;
-      if (dist >= minDist) return;
-      if (dist < 0.0001){ dist = 0.0001; }
-      const nx = dx / dist, ny = dy / dist;
+
+      // only 4 candidate axes are ever needed for box-vs-box in 2D:
+      // each rectangle's own two face normals
+      const axes = [
+        { x: axA.ux, y: axA.uy },
+        { x: axA.vx, y: axA.vy },
+        { x: axB.ux, y: axB.uy },
+        { x: axB.vx, y: axB.vy }
+      ];
+
+      let minOverlap = Infinity, nx = 0, ny = 0;
+      for (const axis of axes){
+        const len = Math.hypot(axis.x, axis.y);
+        if (len < 1e-6) continue;
+        const ax = axis.x / len, ay = axis.y / len;
+        // each rectangle's projected half-width onto this axis
+        const ra = a.halfW * Math.abs(axA.ux * ax + axA.uy * ay) + a.halfH * Math.abs(axA.vx * ax + axA.vy * ay);
+        const rb = b.halfW * Math.abs(axB.ux * ax + axB.uy * ay) + b.halfH * Math.abs(axB.vx * ax + axB.vy * ay);
+        const centerDist = dx * ax + dy * ay;
+        const overlap = ra + rb - Math.abs(centerDist);
+        if (overlap <= 0) return; // a separating axis exists — rectangles don't touch
+        if (overlap < minOverlap){
+          minOverlap = overlap;
+          nx = centerDist >= 0 ? ax : -ax;
+          ny = centerDist >= 0 ? ay : -ay;
+        }
+      }
 
       const invA = (a.dragging || a.broken) ? 0 : 1 / a.mass;
       const invB = (b.dragging || b.broken) ? 0 : 1 / b.mass;
       const invSum = invA + invB;
       if (invSum <= 0) return;
 
-      // positional correction, weighted so the lighter/free object yields more
-      const overlap = minDist - dist;
-      if (invA > 0) { a.x -= nx * overlap * (invA / invSum); a.y -= ny * overlap * (invA / invSum); }
-      if (invB > 0) { b.x += nx * overlap * (invB / invSum); b.y += ny * overlap * (invB / invSum); }
+      // soft positional correction: only correct the overlap beyond a small
+      // slop, and only by a fraction of it per pass — a full instant snap
+      // is what makes stacked/colliding phones look jittery
+      const correction = Math.max(minOverlap - CORRECTION_SLOP, 0) * CORRECTION_PERCENT;
+      if (invA > 0) { a.x -= nx * correction * (invA / invSum); a.y -= ny * correction * (invA / invSum); }
+      if (invB > 0) { b.x += nx * correction * (invB / invSum); b.y += ny * correction * (invB / invSum); }
 
       // relative velocity along the collision normal
       const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
@@ -9606,8 +9755,8 @@ f 317 285 315
       const tx = -ny, ty = nx;
       const relTangent = rvx * tx + rvy * ty;
       const spin = relTangent * 0.05;
-      if (invA > 0) a.angVel -= spin * (invA / invSum) * 40;
-      if (invB > 0) b.angVel += spin * (invB / invSum) * 40;
+      if (invA > 0) a.angVel -= spin * (invA / invSum) * 22;
+      if (invB > 0) b.angVel += spin * (invB / invSum) * 22;
     }
 
     let lastTime = null;
@@ -9629,6 +9778,8 @@ f 317 285 315
         if (!p.dragging){
           const speed = Math.hypot(p.vx, p.vy);
           if (speed > MAX_SPEED){ const s = MAX_SPEED / speed; p.vx *= s; p.vy *= s; }
+          if (p.angVel > MAX_ANG_SPEED) p.angVel = MAX_ANG_SPEED;
+          if (p.angVel < -MAX_ANG_SPEED) p.angVel = -MAX_ANG_SPEED;
           p.x += p.vx * dt;
           p.y += p.vy * dt;
           p.vx *= linDamp;
@@ -9637,10 +9788,11 @@ f 317 285 315
           p.angVel *= angDamp;
           p.bobPhase += p.bobSpeed * dt;
         }
-        if (p.x - p.radius < 0){ p.x = p.radius; p.vx = Math.abs(p.vx) * WALL_RESTITUTION; }
-        if (p.x + p.radius > w){ p.x = w - p.radius; p.vx = -Math.abs(p.vx) * WALL_RESTITUTION; }
-        if (p.y - p.radius < 0){ p.y = p.radius; p.vy = Math.abs(p.vy) * WALL_RESTITUTION; }
-        if (p.y + p.radius > h){ p.y = h - p.radius; p.vy = -Math.abs(p.vy) * WALL_RESTITUTION; }
+        const { hx, hy } = aabbHalfExtents(p);
+        if (p.x - hx < 0){ p.x = hx; p.vx = Math.abs(p.vx) * WALL_RESTITUTION; }
+        if (p.x + hx > w){ p.x = w - hx; p.vx = -Math.abs(p.vx) * WALL_RESTITUTION; }
+        if (p.y - hy < 0){ p.y = hy; p.vy = Math.abs(p.vy) * WALL_RESTITUTION; }
+        if (p.y + hy > h){ p.y = h - hy; p.vy = -Math.abs(p.vy) * WALL_RESTITUTION; }
       });
 
       for (let s = 0; s < SUBSTEPS; s++){
@@ -9655,7 +9807,7 @@ f 317 285 315
         const speed = Math.hypot(p.vx, p.vy);
         const bobAmp = (p.dragging || p.broken) ? 0 : Math.max(0, 6 - speed * 1.5);
         const bob = (p.dragging || p.broken) ? 0 : Math.sin(p.bobPhase) * bobAmp;
-        p.wrap.style.transform = `translate(${p.x - p.radius}px, ${p.y - p.radius + bob}px)`;
+        p.wrap.style.transform = `translate(${p.x - p.halfW}px, ${p.y - p.halfH + bob}px)`;
         p.phoneEl.style.transform = `rotate(${p.cfg.rot + p.angle}deg)`;
       });
 
@@ -9825,7 +9977,7 @@ f 317 285 315
       ${magsafe}${leather}${liquid}
       <rect x="${caseX-4}" y="142" width="6" height="58" rx="3" fill="${color}"/>
       <rect x="${caseX-4}" y="216" width="6" height="58" rx="3" fill="${color}"/>
-      <rect x="${caseX+caseWidth-2}" y="180" width="6" height="80" rx="3" fill="${color}"/>
+      ${(isMagSafe || isLeather) ? '' : `<rect x="${caseX+caseWidth-2}" y="180" width="6" height="80" rx="3" fill="${color}"/>`}
     </svg>`;
   }
 
@@ -10107,7 +10259,7 @@ f 317 285 315
     scene.add(wrapper);
 
     const H = bbox.max.y - bbox.min.y;
-    const fitDist = (H * 1.95) / Math.tan((camera.fov * Math.PI/180) / 2);
+    const fitDist = (H * 1.45) / Math.tan((camera.fov * Math.PI/180) / 2);
     camera.position.set(0, 0, fitDist);
     camera.lookAt(0, 0, 0);
     wrapper.rotation.x = THREE.MathUtils.degToRad(-14);
