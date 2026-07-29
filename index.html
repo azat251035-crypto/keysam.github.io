@@ -9994,17 +9994,23 @@ f 317 285 315
     'Redmi Note 13': 'redminote13'
   };
 
-  function parseOBJtoGeometry(text){
+  function parseOBJtoGeometry(text, mirrorX){
     const positions = [];
     const indices = [];
     text.split('\n').forEach(raw => {
       const line = raw.trim();
       if (line.startsWith('v ')){
         const p = line.split(/\s+/);
-        positions.push(parseFloat(p[1]), parseFloat(p[2]), parseFloat(p[3]));
+        const x = parseFloat(p[1]);
+        positions.push(mirrorX ? -x : x, parseFloat(p[2]), parseFloat(p[3]));
       } else if (line.startsWith('f ')){
         const p = line.split(/\s+/).slice(1).map(tok => parseInt(tok.split('/')[0], 10) - 1);
-        for (let i = 1; i < p.length - 1; i++) indices.push(p[0], p[i], p[i + 1]);
+        // mirroring one axis flips handedness, so reverse the winding order
+        // (swap the last two indices of the fan) to keep face normals correct
+        for (let i = 1; i < p.length - 1; i++){
+          if (mirrorX) indices.push(p[0], p[i + 1], p[i]);
+          else indices.push(p[0], p[i], p[i + 1]);
+        }
       }
     });
     const geometry = new THREE.BufferGeometry();
@@ -10027,12 +10033,14 @@ f 317 285 315
       : new Float32Array(count * 3);
     geometry.__colorBuffer = colors;
     // Dark, matte tones so the phone reads as an actual phone back (like the hero
-    // graphic on the main page) instead of a pale slab — the camera bump is tinted
-    // a neutral housing color rather than the case's accent color, so the case never
-    // "paints" the camera.
+    // graphic on the main page) instead of a pale slab. The camera-bump housing is
+    // a touch lighter than the body — like real phones, where the raised bump is
+    // body-colored metal/glass, not black — so the true black glass plate added on
+    // top in buildCameraLenses reads as a distinct, darker inset rather than
+    // blending into an already-dark bump.
     const body = new THREE.Color(0x28282d);
     const screen = new THREE.Color(0x040404);
-    const cam = new THREE.Color(0x1c1d22);
+    const cam = new THREE.Color(0x353539);
     for (let i = 0; i < count; i++){
       const z = pos.getZ(i);
       const c = z > frontZ - 0.05 ? screen : (z < -0.05 ? cam : body);
@@ -10044,7 +10052,14 @@ f 317 285 315
 
   const objGeometryCache = {};
   function getPhoneGeometry(objKey){
-    if (!objGeometryCache[objKey]) objGeometryCache[objKey] = parseOBJtoGeometry(OBJ_TEXT[objKey]);
+    if (!objGeometryCache[objKey]){
+      // the shared ~146° "show the back" rotation used for every phone model
+      // flips left/right on screen; iPhone models' camera bump sits on the
+      // geometry's left side, so it needs mirroring to land back on the left
+      // as viewed, instead of appearing on the right.
+      const mirrorX = objKey.startsWith('iphone');
+      objGeometryCache[objKey] = parseOBJtoGeometry(OBJ_TEXT[objKey], mirrorX);
+    }
     return objGeometryCache[objKey];
   }
 
@@ -10068,9 +10083,31 @@ f 317 285 315
     return found ? { minX, maxX, minY, maxY, tipZ } : null;
   }
 
-  // Builds a proper 3-lens iPhone-style camera module (two lenses up top, one lens
-  // + flash below — same layout as the hero graphic on the main page) sized and
-  // placed to match the phone model's own camera-bump footprint.
+  // A rounded-rectangle outline used for the camera plate, so it reads as a real
+  // milled housing with soft corners instead of a sharp-edged box.
+  function roundedRectShape(w, h, r){
+    const shape = new THREE.Shape();
+    const x = -w / 2, y = -h / 2;
+    shape.moveTo(x + r, y);
+    shape.lineTo(x + w - r, y);
+    shape.quadraticCurveTo(x + w, y, x + w, y + r);
+    shape.lineTo(x + w, y + h - r);
+    shape.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    shape.lineTo(x + r, y + h);
+    shape.quadraticCurveTo(x, y + h, x, y + h - r);
+    shape.lineTo(x, y + r);
+    shape.quadraticCurveTo(x, y, x + r, y);
+    return shape;
+  }
+
+  // Builds a proper 3-lens iPhone-style camera module — camera 1 and camera 2
+  // stacked on the right side of the block, camera 3 on the left side
+  // vertically centered between them, and the flash above camera 3. Shared
+  // by every iPhone model (see the objKey.startsWith('iphone') check below),
+  // so this one function drives the camera bump on all of them. The
+  // rounded-corner black glass plate sits inset in a raised, body-colored
+  // step, and each lens has a brushed-metal ring, dark reflective glass, and
+  // a small catchlight.
   function buildCameraLenses(bumpRect){
     const group = new THREE.Group();
     const cx = (bumpRect.minX + bumpRect.maxX) / 2;
@@ -10078,32 +10115,78 @@ f 317 285 315
     const w = bumpRect.maxX - bumpRect.minX, h = bumpRect.maxY - bumpRect.minY;
     const z = bumpRect.tipZ;
 
-    const plateMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0b, roughness: 0.5, metalness: 0.25 });
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(w * 0.84, h * 0.84, 0.3), plateMat);
-    plate.position.set(cx, cy, z - 0.02);
+    // Real iPhone camera blocks are a two-tier housing: a slightly raised,
+    // body-colored/brushed-metal step first, then the true-black glass plate
+    // sits inset a level below it with its own bevelled rim. Building both
+    // tiers (instead of one flat black slab) is what makes the module read as
+    // a real milled housing rather than a sticker.
+    const stepW = w * 0.94, stepH = h * 0.94, stepDepth = 0.14;
+    const stepShape = roundedRectShape(stepW, stepH, Math.min(stepW, stepH) * 0.26);
+    const stepGeo = new THREE.ExtrudeGeometry(stepShape, {
+      depth: stepDepth, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 2
+    });
+    stepGeo.translate(0, 0, -stepDepth / 2);
+    const stepMat = new THREE.MeshPhysicalMaterial({ color: 0x3d3d43, roughness: 0.5, metalness: 0.5, clearcoat: 0.2 });
+    const step = new THREE.Mesh(stepGeo, stepMat);
+    step.position.set(cx, cy, z + 0.06);
+    group.add(step);
+
+    // rounded-corner glass plate with a bevelled rim, instead of a flat sharp box
+    const plateW = w * 0.8, plateH = h * 0.8, plateDepth = 0.34;
+    const plateShape = roundedRectShape(plateW, plateH, Math.min(plateW, plateH) * 0.24);
+    const plateGeo = new THREE.ExtrudeGeometry(plateShape, {
+      depth: plateDepth, bevelEnabled: true, bevelThickness: 0.08, bevelSize: 0.07, bevelSegments: 3
+    });
+    plateGeo.translate(0, 0, -plateDepth / 2);
+    const plateMat = new THREE.MeshPhysicalMaterial({
+      color: 0x07070a, roughness: 0.3, metalness: 0.35, clearcoat: 0.85, clearcoatRoughness: 0.18
+    });
+    const plate = new THREE.Mesh(plateGeo, plateMat);
+    plate.position.set(cx, cy, z - 0.04);
     group.add(plate);
 
-    const ringMat = new THREE.MeshStandardMaterial({ color: 0x4b4b50, roughness: 0.3, metalness: 0.65 });
-    const lensMat = new THREE.MeshStandardMaterial({ color: 0x141417, roughness: 0.1, metalness: 0.4 });
-    const flashMat = new THREE.MeshStandardMaterial({ color: 0xE0BE5E, roughness: 0.3, metalness: 0.5 });
+    // brushed-metal barrels — reverted to the original darker, less chrome-like
+    // tone — with a thin dark bezel between the ring and the glass itself.
+    const ringMat = new THREE.MeshStandardMaterial({ color: 0x5a5a60, roughness: 0.22, metalness: 0.85 });
+    const bezelMat = new THREE.MeshStandardMaterial({ color: 0x1a1b1f, roughness: 0.35, metalness: 0.5 });
+    const lensMat = new THREE.MeshPhysicalMaterial({ color: 0x0d1016, roughness: 0.06, metalness: 0.55, clearcoat: 0.8, clearcoatRoughness: 0.08 });
+    const catchlightMat = new THREE.MeshStandardMaterial({ color: 0xe8ecf2, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.85 });
+    const flashMat = new THREE.MeshStandardMaterial({ color: 0xE0BE5E, roughness: 0.25, metalness: 0.5 });
 
-    const lensR = Math.min(w, h) * 0.155;
-    const offX = w * 0.23, offY = h * 0.23;
-    const lensZ = z - 0.16;
-    [[cx - offX, cy + offY], [cx + offX, cy + offY], [cx - offX, cy - offY]].forEach(([lx, ly]) => {
-      const ring = new THREE.Mesh(new THREE.CylinderGeometry(lensR, lensR, 0.5, 24), ringMat);
+    const lensR = Math.min(w, h) * 0.185;
+    const offX = w * 0.24, offY = h * 0.24;
+    const lensZ = z - 0.12;
+
+    function addLens(lx, ly){
+      const ring = new THREE.Mesh(new THREE.CylinderGeometry(lensR, lensR * 1.04, 0.6, 32), ringMat);
       ring.rotation.x = Math.PI / 2;
       ring.position.set(lx, ly, lensZ);
       group.add(ring);
-      const lens = new THREE.Mesh(new THREE.CylinderGeometry(lensR * 0.72, lensR * 0.72, 0.62, 24), lensMat);
+      const bezel = new THREE.Mesh(new THREE.CylinderGeometry(lensR * 0.8, lensR * 0.8, 0.48, 32), bezelMat);
+      bezel.rotation.x = Math.PI / 2;
+      bezel.position.set(lx, ly, lensZ - 0.06);
+      group.add(bezel);
+      const lens = new THREE.Mesh(new THREE.CylinderGeometry(lensR * 0.66, lensR * 0.66, 0.46, 32), lensMat);
       lens.rotation.x = Math.PI / 2;
-      lens.position.set(lx, ly, lensZ - 0.08);
+      lens.position.set(lx, ly, lensZ - 0.16);
       group.add(lens);
-    });
+      // small bright catchlight, offset toward the key light, like a real glass lens
+      const catch_ = new THREE.Mesh(new THREE.CircleGeometry(lensR * 0.14, 12), catchlightMat);
+      catch_.position.set(lx - lensR * 0.3, ly + lensR * 0.3, lensZ - 0.44);
+      group.add(catch_);
+    }
 
-    const flash = new THREE.Mesh(new THREE.CylinderGeometry(lensR * 0.42, lensR * 0.42, 0.42, 16), flashMat);
+    // requested layout (mirrored): two cameras stacked on the right side of
+    // the block (camera 1 top, camera 2 bottom); camera 3 on the left side,
+    // vertically centered — level with the midpoint between camera 1 and
+    // camera 2; and the flash sits above camera 3, also on the left side.
+    addLens(cx + offX, cy + offY);   // camera 1 — right, top
+    addLens(cx + offX, cy - offY);   // camera 2 — right, bottom
+    addLens(cx - offX, cy);          // camera 3 — left, vertically centered
+
+    const flash = new THREE.Mesh(new THREE.CylinderGeometry(lensR * 0.34, lensR * 0.34, 0.36, 24), flashMat);
     flash.rotation.x = Math.PI / 2;
-    flash.position.set(cx + offX, cy - offY, lensZ);
+    flash.position.set(cx - offX, cy + offY, lensZ + 0.06);   // above camera 3
     group.add(flash);
 
     return group;
@@ -10138,6 +10221,24 @@ f 317 285 315
       color: new THREE.Color(baseColor), roughness, metalness, transparent, opacity, side: THREE.DoubleSide
     });
 
+    // The glass case's back gets its own material: solid white instead of the
+    // clear tinted frame color, with a clearcoat layer so it picks up sharp
+    // specular highlights from the scene lights — reading as glossy glass
+    // rather than a flat plastic slab.
+    const backMaterial = category === 'glass'
+      ? new THREE.MeshPhysicalMaterial({
+          color: 0xffffff,
+          roughness: 0.08,
+          metalness: 0.1,
+          clearcoat: 1,
+          clearcoatRoughness: 0.04,
+          reflectivity: 1,
+          opacity: 0.92,
+          transparent: true,
+          side: THREE.DoubleSide
+        })
+      : material;
+
     const zTop = frontZ + lip, zBottom = backZ - backThickness;
     const wallDepth = zTop - zBottom, zCenter = (zTop + zBottom) / 2;
 
@@ -10154,7 +10255,7 @@ f 317 285 315
       const addBand = (x0, x1, y0, y1) => {
         const w = x1 - x0, h = y1 - y0;
         if (w <= 0 || h <= 0) return;
-        const band = new THREE.Mesh(new THREE.BoxGeometry(w, h, backThickness), material);
+        const band = new THREE.Mesh(new THREE.BoxGeometry(w, h, backThickness), backMaterial);
         band.position.set((x0 + x1) / 2, (y0 + y1) / 2, zBackCenter);
         group.add(band);
       };
@@ -10163,7 +10264,7 @@ f 317 285 315
       addBand(panelMinX, holeMinX, holeMinY, holeMaxY);     // left of the camera
       addBand(holeMaxX, panelMaxX, holeMinY, holeMaxY);     // right of the camera
     } else {
-      const backPanel = new THREE.Mesh(new THREE.BoxGeometry(W + margin*2, H + margin*2, backThickness), material);
+      const backPanel = new THREE.Mesh(new THREE.BoxGeometry(W + margin*2, H + margin*2, backThickness), backMaterial);
       backPanel.position.set(cx, cy, zBackCenter);
       group.add(backPanel);
     }
@@ -10223,6 +10324,20 @@ f 317 285 315
     liveScene = null;
   }
 
+  // Relative on-screen size for the 3D viewer. The camera framing (fitDist,
+  // below) is computed from each model's own raw bounding box, so scaling the
+  // assembly here actually changes how big it looks — it isn't auto-cancelled
+  // out by the camera backing off. iPhone 13 is the baseline; 14 is scaled up
+  // from it, and 15 up again from 14, so the size progression reads clearly.
+  const MODEL_SIZE_SCALE = {
+    iphone13: 1,
+    iphone13mini: 0.9,
+    iphone14: 1.08,
+    iphone14pro: 1.08,
+    iphone15: 1.16,
+    iphone15pro: 1.16
+  };
+
   function mount3DCase(container, objKey, category, color){
     disposeLiveScene();
     const width = 300, height = 340;
@@ -10252,7 +10367,11 @@ f 317 285 315
     }
     const center = new THREE.Vector3();
     bbox.getCenter(center);
-    inner.position.set(-center.x, -center.y, -center.z);
+    const sizeScale = MODEL_SIZE_SCALE[objKey] || 1;
+    inner.scale.setScalar(sizeScale);
+    // scale composes before translation in Object3D's local matrix, so the
+    // centering offset must be scaled too or the phone ends up off-center
+    inner.position.set(-center.x * sizeScale, -center.y * sizeScale, -center.z * sizeScale);
 
     const wrapper = new THREE.Group();
     wrapper.add(inner);
